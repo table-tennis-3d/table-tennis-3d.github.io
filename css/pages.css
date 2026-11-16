@@ -1,0 +1,29 @@
+/* 説明ページ（使い方・数値の見方・よくある質問・プライバシーポリシーなど） */
+.doc-main { max-width: 780px; padding-block: 28px 48px; }
+.doc-main article { display: flow-root; }
+.doc-main h1 { font-size: clamp(26px, 5vw, 34px); line-height: 1.3; margin: 0 0 10px; letter-spacing: .01em; text-wrap: balance; }
+.doc-lead { color: var(--muted); font-size: 16px; margin: 0 0 28px; }
+.doc-main h2 { font-size: 20px; line-height: 1.4; margin: 40px 0 12px; padding-top: 22px; border-top: 1px solid var(--border); text-wrap: balance; }
+.doc-main h3 { font-size: 16px; margin: 24px 0 8px; color: var(--accent-strong); }
+.doc-main p { margin: 0 0 14px; color: #d3d8e2; }
+.doc-main ul, .doc-main ol { margin: 0 0 16px; padding-left: 24px; color: #d3d8e2; }
+.doc-main li { margin-bottom: 8px; }
+.doc-main li::marker { color: var(--faint); }
+.doc-main strong { color: var(--text); }
+.doc-main a { color: var(--accent-strong); text-underline-offset: 3px; }
+.doc-main .note { margin: 18px 0; padding: 14px 16px; border-radius: 12px; background: var(--bg-elev); border: 1px solid var(--border); color: #d3d8e2; font-size: 14px; }
+.doc-main .note strong { display: block; margin-bottom: 4px; }
+.doc-main dl { margin: 0 0 16px; }
+.doc-main dt { font-weight: 700; color: var(--text); margin-top: 18px; }
+.doc-main dd { margin: 6px 0 0; color: #d3d8e2; }
+.doc-table { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--border); border-radius: 12px; }
+.doc-table table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 520px; }
+.doc-table th, .doc-table td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.doc-table tr:last-child td { border-bottom: 0; }
+.doc-table th { background: var(--bg-elev); color: var(--muted); font-weight: 600; white-space: nowrap; }
+.doc-cta { margin: 36px 0 0; padding: 22px; border-radius: 16px; background: linear-gradient(180deg, #11211f, #0f1618); border: 1px solid #1f3d39; text-align: center; }
+.doc-cta p { margin: 0 0 12px; color: var(--text); font-weight: 600; }
+.doc-updated { color: var(--faint); font-size: 13px; margin-top: 32px; }
+a.btn { text-decoration: none; }
+.doc .site-footer { max-width: 780px; margin: 0 auto 40px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.site-footer a[aria-current="page"] { color: var(--text); text-decoration: none; font-weight: 600; }
