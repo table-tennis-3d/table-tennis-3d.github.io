@@ -1,6 +1,5 @@
 // 3Dの動きから角度・速さなどを計算する
 import { N, LM } from './landmarks.js';
-import { gaussian1D } from './motion.js';
 
 const S = N * 3;
 const DEG = 180 / Math.PI;
@@ -52,6 +51,10 @@ export const CHART_GROUPS = [
     id: 'stance', title: 'スタンス幅', unit: 'cm', sub: '左右の足首の間隔',
     series: [{ key: 'stance', label: '幅', color: '#5eead4' }],
   },
+  {
+    id: 'shift', title: '体の横移動', unit: 'cm', sub: '画面の右が＋・体重移動やフットワーク',
+    series: [{ key: 'shift', label: '腰の位置', color: '#5eead4' }],
+  },
 ];
 
 // 「この瞬間の数値」に出すカード
@@ -79,9 +82,9 @@ export function metricCards(handedness) {
  * @param {{timeScale?: number}} opts timeScale: 実時間/動画時間（1/4スローなら0.25）
  */
 export function computeMetrics(motion, { timeScale = 1 } = {}) {
-  const { n, fps, pos } = motion;
+  const { n, pos } = motion;
   const keys = ['elbowL', 'elbowR', 'kneeL', 'kneeR', 'armpitL', 'armpitR', 'hipL', 'hipR',
-    'trunkLean', 'trunkSide', 'pelvisYaw', 'shoulderYaw', 'xFactor', 'wristSpeedL', 'wristSpeedR', 'hipHeight', 'stance'];
+    'trunkLean', 'trunkSide', 'pelvisYaw', 'shoulderYaw', 'xFactor', 'wristSpeedL', 'wristSpeedR', 'hipHeight', 'stance', 'shift'];
   const m = {};
   for (const k of keys) m[k] = new Float32Array(n);
 
@@ -127,19 +130,21 @@ export function computeMetrics(motion, { timeScale = 1 } = {}) {
   unwrapDegrees(m.shoulderYaw);
   unwrapDegrees(m.xFactor);
 
-  // 手首の速さ（腰の中心に対する相対速度、実時間に換算）
-  const dt = timeScale / fps;
+  // 手首の速さ（腰の中心に対する相対速度、実時間に換算）。速度は平滑化と同時に求めたものを使う
+  const vel = motion.vel;
   for (const [key, w] of [['wristSpeedL', LM.L_WRIST], ['wristSpeedR', LM.R_WRIST]]) {
-    const raw = new Float32Array(n);
+    const out = m[key];
     for (let i = 0; i < n; i++) {
-      const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
-      if (a === b) continue;
-      const ra = relToHip(pos, a, w), rb = relToHip(pos, b, w);
-      raw[i] = Math.hypot(rb[0] - ra[0], rb[1] - ra[1], rb[2] - ra[2]) / ((b - a) * dt);
+      const o = i * S;
+      const vx = vel[o + w * 3] - (vel[o + LM.L_HIP * 3] + vel[o + LM.R_HIP * 3]) / 2;
+      const vy = vel[o + w * 3 + 1] - (vel[o + LM.L_HIP * 3 + 1] + vel[o + LM.R_HIP * 3 + 1]) / 2;
+      const vz = vel[o + w * 3 + 2] - (vel[o + LM.L_HIP * 3 + 2] + vel[o + LM.R_HIP * 3 + 2]) / 2;
+      out[i] = Math.hypot(vx, vy, vz) / timeScale;
     }
-    // 微分で増えるノイズを軽くならす（約25ミリ秒）
-    m[key] = gaussian1D(raw, n, 0.025 * fps);
   }
+
+  // 体の横移動（カメラから見て左右。体重移動やフットワーク）
+  if (motion.rootX) for (let i = 0; i < n; i++) m.shift[i] = motion.rootX[i] * 100;
   return m;
 }
 
@@ -220,15 +225,6 @@ function unwrapDegrees(arr) {
     while (d > 180) { arr[i] -= 360; d -= 360; }
     while (d < -180) { arr[i] += 360; d += 360; }
   }
-}
-
-function relToHip(P, i, j) {
-  const o = i * S;
-  return [
-    P[o + j * 3] - (P[o + LM.L_HIP * 3] + P[o + LM.R_HIP * 3]) / 2,
-    P[o + j * 3 + 1] - (P[o + LM.L_HIP * 3 + 1] + P[o + LM.R_HIP * 3 + 1]) / 2,
-    P[o + j * 3 + 2] - (P[o + LM.L_HIP * 3 + 2] + P[o + LM.R_HIP * 3 + 2]) / 2,
-  ];
 }
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }

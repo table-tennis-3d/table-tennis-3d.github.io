@@ -332,6 +332,7 @@ export class Viewer3D {
     this.trailOn = true;
     this.trailSeconds = 0.6;
     this.timeScale = 1;
+    this.rootOn = true;
     this.facingYaw = 0;
     this.targetY = 0.95;
     this.view = 'camera';
@@ -439,6 +440,26 @@ export class Viewer3D {
 
   get wristIndex() { return this.handedness === 'left' ? LM.L_WRIST : LM.R_WRIST; }
 
+  /** 体の横移動（体重移動・フットワーク）を表示に反映するか */
+  setRootEnabled(on) {
+    this.rootOn = on;
+    this.pathKey = '';
+    this.dirty = true;
+  }
+
+  // 重ねて比較しているときは、姿勢そのものを比べやすいように横移動を足さない
+  get useRoot() {
+    return this.rootOn && !(this.ghost && this.ghost.layout === 'overlay');
+  }
+
+  // コマ i の手首の位置（横移動つき）を pts に追加する
+  pushWrist(pts, i, w) {
+    const m = this.motion;
+    const o = i * N * 3 + w * 3;
+    const rx = this.useRoot && m.rootX ? m.rootX[i] : 0;
+    pts.push(m.pos[o] + rx, m.pos[o + 1], m.pos[o + 2]);
+  }
+
   buildPath() {
     this.pathKey = '';
     this.pathMat.color.set(this.handedness === 'left' ? COLORS.L : COLORS.R);
@@ -452,15 +473,12 @@ export class Viewer3D {
     const i0 = Math.max(0, Math.floor((t - before - m.start) * m.fps));
     const i1 = Math.min(m.n - 1, Math.ceil((t + after - m.start) * m.fps));
     const w = this.wristIndex;
-    const key = `${i0}:${i1}:${w}`;
+    const key = `${i0}:${i1}:${w}:${this.useRoot ? 1 : 0}`;
     if (key === this.pathKey) return;
     this.pathKey = key;
     if (i1 - i0 < 2) { this.path.visible = false; return; }
     const pts = [];
-    for (let i = i0; i <= i1; i++) {
-      const o = i * N * 3 + w * 3;
-      pts.push(m.pos[o], m.pos[o + 1], m.pos[o + 2]);
-    }
+    for (let i = i0; i <= i1; i++) this.pushWrist(pts, i, w);
     this.path.geometry.dispose();
     this.path.geometry = new LineGeometry();
     this.path.geometry.setPositions(pts);
@@ -478,8 +496,7 @@ export class Viewer3D {
     const pts = [];
     const ts = [];
     for (let i = i0; i < iNow && i < m.n; i++) {
-      const o = i * N * 3 + w * 3;
-      pts.push(m.pos[o], m.pos[o + 1], m.pos[o + 2]);
+      this.pushWrist(pts, i, w);
       ts.push(m.times[i]);
     }
     pts.push(this.P[w * 3], this.P[w * 3 + 1], this.P[w * 3 + 2]);
@@ -505,16 +522,18 @@ export class Viewer3D {
   /** 比較用の動きを設定（offset: 比較側の時刻 = 本体の時刻 + offset） */
   setGhost(motion, { offset = 0, layout = 'overlay' } = {}) {
     this.ghost = { motion, offset, layout };
+    this.pathKey = '';
     this.ghostGroup.visible = true;
     this.alignGhost();
     this.dirty = true;
   }
 
   setGhostOffset(offset) { if (this.ghost) { this.ghost.offset = offset; this.dirty = true; } }
-  setGhostLayout(layout) { if (this.ghost) { this.ghost.layout = layout; this.alignGhost(); this.dirty = true; } }
+  setGhostLayout(layout) { if (this.ghost) { this.ghost.layout = layout; this.pathKey = ''; this.alignGhost(); this.dirty = true; } }
 
   clearGhost() {
     this.ghost = null;
+    this.pathKey = '';
     this.ghostGroup.visible = false;
     this.dirty = true;
   }
@@ -535,12 +554,13 @@ export class Viewer3D {
   /** 時刻 t の姿勢を表示 */
   setTime(t) {
     if (!this.motion) return;
-    samplePose(this.motion, t, this.P);
+    const root = this.useRoot;
+    samplePose(this.motion, t, this.P, root);
     if (this.mode === 'mannequin') this.mannequin.update(this.P); else this.stick.update(this.P);
     this.updateTrail(t);
     this.updatePath(t);
     if (this.ghost) {
-      samplePose(this.ghost.motion, t + this.ghost.offset, this.GP);
+      samplePose(this.ghost.motion, t + this.ghost.offset, this.GP, root);
       if (this.mode === 'mannequin') this.ghostMannequin.update(this.GP); else this.ghostStick.update(this.GP);
     }
     this.lastT = t;

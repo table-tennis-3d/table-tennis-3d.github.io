@@ -20,7 +20,7 @@ export class Overlay2D {
     if (this.canvas.width !== W || this.canvas.height !== H) {
       this.canvas.width = W; this.canvas.height = H;
     }
-    if (this.last) this.draw(...this.last);
+    if (this.last) this.draw(...this.last); else this.drawCrop();
   }
 
   // object-fit: contain の実際の映像の位置
@@ -35,6 +35,45 @@ export class Overlay2D {
     this.last = null;
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.drawCrop();
+  }
+
+  /** 人物の範囲（動画全体を0〜1とした座標）。null で解除 */
+  setCrop(crop) {
+    this.crop = crop;
+    if (this.last) this.draw(...this.last); else this.clear();
+  }
+
+  // 範囲の外側を暗くして、枠を描く
+  drawCrop() {
+    const c = this.crop;
+    if (!c) return;
+    const ctx = this.ctx;
+    const r = this.contentRect();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const x = r.x + c.x0 * r.w, y = r.y + c.y0 * r.h, w = (c.x1 - c.x0) * r.w, h = (c.y1 - c.y0) * r.h;
+    ctx.fillStyle = 'rgba(5, 8, 12, 0.55)';
+    ctx.beginPath();
+    ctx.rect(r.x, r.y, r.w, r.h);
+    ctx.rect(x, y, w, h);
+    ctx.fill('evenodd');
+    ctx.strokeStyle = '#2dd4bf';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 5]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+  }
+
+  /** 画面上の位置（clientX, clientY）を動画全体の座標（0〜1）に直す。mirrored: 表示が左右反転しているか */
+  toVideoCoords(clientX, clientY, mirrored) {
+    const b = this.canvas.getBoundingClientRect();
+    const lx = mirrored ? b.right - clientX : clientX - b.left;
+    const ly = clientY - b.top;
+    const r = this.contentRect();
+    return {
+      u: Math.max(0, Math.min(1, (lx - r.x) / r.w)),
+      v: Math.max(0, Math.min(1, (ly - r.y) / r.h)),
+    };
   }
 
   /**
@@ -47,6 +86,7 @@ export class Overlay2D {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.drawCrop();
     if (!img) return;
     const stride = opts.stride || 2;
     const r = this.contentRect();

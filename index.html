@@ -7,6 +7,13 @@
   <meta name="description" content="自撮りしたスポーツのフォーム動画から、AIが全身の関節を推定して3Dモデルで再生します。動画は端末の中だけで処理されます。">
   <meta name="theme-color" content="#0e1014">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2314b8a6'/%3E%3Ccircle cx='16' cy='8' r='3' fill='%23fff'/%3E%3Cpath d='M16 12v8m0 0-4 7m4-7 4 7M9 14l7-2 7 2' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="フォーム3D">
+  <meta property="og:title" content="フォーム3D">
+  <meta property="og:description" content="自撮りしたスポーツのフォーム動画から、AIが全身の関節を推定して3Dモデルで再生します。動画は端末の中だけで処理されます。">
+  <meta property="og:type" content="website">
   <link rel="stylesheet" href="css/style.css">
   <script type="importmap">
   {
@@ -46,10 +53,30 @@
         <span class="dz-sub">またはここにドラッグ＆ドロップ（MP4 / MOV / WebM）</span>
       </label>
 
+      <div class="pick-alt">
+        <button class="btn" id="btnCapture" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="m16 10.5 5-3v9l-5-3"/></svg>
+          カメラで撮る
+        </button>
+        <input type="file" id="captureInput" accept="video/*" capture="environment" hidden>
+      </div>
+
       <p class="privacy">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
         動画はこの端末の中だけで処理され、サーバーには送信されません。
       </p>
+
+      <section class="history" id="historySection" hidden aria-labelledby="historyTitle">
+        <div class="history-head">
+          <h2 id="historyTitle">履歴</h2>
+          <span class="muted" id="historyUsage"></span>
+        </div>
+        <ul class="history-list" id="historyList"></ul>
+        <div class="history-foot">
+          <label class="check"><input type="checkbox" data-setting="keepVideo" checked><span>元の動画も履歴に残す（この端末のブラウザの中に保存）</span></label>
+          <button class="link" id="btnHistoryClear" type="button">履歴をすべて消す</button>
+        </div>
+      </section>
 
       <div class="tips">
         <h2>うまく3Dにするための撮り方</h2>
@@ -68,6 +95,17 @@
         <button class="link" id="btnImport" type="button">ファイルを選ぶ（.json）</button>
         <input type="file" id="importInput" accept=".json,application/json" hidden>
       </p>
+
+      <footer class="site-footer">
+        <nav aria-label="このサイトの案内">
+          <a href="guide.html">使い方と撮り方</a>
+          <a href="metrics.html">数値の見方</a>
+          <a href="faq.html">よくある質問</a>
+          <a href="privacy.html">プライバシーポリシー</a>
+          <a href="about.html">このサイトについて</a>
+        </nav>
+        <p>© 2026 フォーム3D</p>
+      </footer>
     </section>
 
     <!-- ②〜④ 作業画面 -->
@@ -122,6 +160,14 @@
             <button class="link" id="btnTrimReset" type="button">全体に戻す</button>
           </div>
           <p class="hint">動画を再生・一時停止して、スイングの少し前〜少し後ろを範囲にすると速く正確になります。</p>
+          <div class="crop-row">
+            <div class="field-label">人物の範囲 <span class="muted" id="cropLabel">指定なし（画面全体から探す）</span></div>
+            <div class="trim-buttons">
+              <button class="btn small" id="btnCrop" type="button" aria-pressed="false">人物を囲む</button>
+              <button class="link" id="btnCropClear" type="button" hidden>解除</button>
+            </div>
+            <p class="hint">ほかの人が映っているときや、人物が小さく映っているときに、動画の上をなぞって解析したい人を囲みます。動き回る範囲ごと広めに囲ってください。</p>
+          </div>
         </div>
         <div class="prep-settings">
           <div class="field">
@@ -140,11 +186,11 @@
             </select>
           </div>
           <div class="field">
-            <div class="field-label">1秒あたりの解析コマ数</div>
+            <div class="field-label">解析するコマ <span class="muted" id="fpsLabel"></span></div>
             <select id="optFps">
-              <option value="15">15コマ（速い）</option>
-              <option value="30" selected>30コマ（標準）</option>
-              <option value="60">60コマ（速い動きを細かく）</option>
+              <option value="auto" selected>動画に合わせる（おすすめ）</option>
+              <option value="all">すべてのコマ（高速撮影の動画を細かく）</option>
+              <option value="half">間引く（速く終わる）</option>
             </select>
           </div>
           <div class="field">
@@ -214,7 +260,8 @@
             <h2>スイングの山場</h2>
             <span class="muted">手首がいちばん速い瞬間</span>
           </header>
-          <div id="swingList" class="swing-list"></div>
+          <div id="swingList" class="swing-list" role="group" aria-label="繰り返す範囲"></div>
+          <p class="hint swing-hint">スイングを選ぶと、その前後だけを繰り返し再生します。「全体」で元に戻ります。</p>
           <dl class="summary" id="summary"></dl>
         </section>
 
@@ -264,6 +311,7 @@
             </div>
             <label class="check"><input type="checkbox" data-setting="trail" checked><span>利き手の軌跡を表示</span></label>
             <label class="check"><input type="checkbox" data-setting="floor" checked><span>足を床に接地させる</span></label>
+            <label class="check"><input type="checkbox" data-setting="footwork" checked><span>体の横移動を再現する</span></label>
             <label class="check"><input type="checkbox" data-setting="mirror"><span>左右反転している動画</span></label>
             <label class="check"><input type="checkbox" data-setting="overlay" checked><span>元動画に骨格を重ねる</span></label>
           </div>
@@ -275,10 +323,11 @@
             <span class="muted">お手本や前回のフォームと重ねる</span>
           </header>
           <div class="compare-empty" id="compareEmpty">
-            <p>別の動画、または保存した解析データを読み込むと、半透明の人形で重ねて表示します。スイングの山場で自動的にタイミングを合わせます。</p>
+            <p>履歴や別の動画を選ぶと、半透明の人形で重ねて表示します。スイングの山場で自動的にタイミングを合わせます。</p>
             <div class="row">
-              <button class="btn" id="btnCompareVideo" type="button">比較する動画を選ぶ</button>
-              <button class="btn" id="btnCompareJson" type="button">解析データ（.json）を選ぶ</button>
+              <button class="btn" id="btnCompareHistory" type="button">履歴から選ぶ</button>
+              <button class="btn" id="btnCompareVideo" type="button">動画を選ぶ</button>
+              <button class="btn" id="btnCompareJson" type="button">解析データ（.json）</button>
             </div>
             <input type="file" id="compareVideoInput" accept="video/*" hidden>
             <input type="file" id="compareJsonInput" accept=".json,application/json" hidden>
@@ -309,7 +358,7 @@
             <button class="btn" id="btnRecord" type="button">3Dを動画で保存</button>
             <button class="btn" id="btnExport" type="button">解析データを保存（.json）</button>
           </div>
-          <p class="hint">解析データを保存しておくと、あとで再解析せずに開いたり、比較に使えます。</p>
+          <p class="hint" id="saveStatus">解析結果は自動で履歴に残ります。トップ画面の「履歴」からいつでも開けます。</p>
         </section>
       </div>
     </section>
@@ -333,13 +382,25 @@
       <ul class="caveats">
         <li>1台のカメラの映像から3Dを<b>推定</b>しているため、カメラに対して前後（奥行き）方向は誤差が大きめです。</li>
         <li>ラケット・バット・ボールは追跡しません。体の33か所の点から人形を動かしています。</li>
+        <li>体の移動は、カメラから見て左右の動きだけを再現します。前後（奥行き）の移動は再現しません。</li>
         <li>動きが速すぎてブレたコマは、前後のコマから補間されます。</li>
         <li>角度や速さは目安です。同じ撮り方で撮った動画どうしで比べると、変化が分かりやすくなります。</li>
-        <li>動画は端末の中だけで処理され、どこにも送信されません。</li>
+        <li>動画は端末の中だけで処理され、どこにも送信されません。履歴もこの端末のブラウザの中だけに保存されます。</li>
       </ul>
     </form>
   </dialog>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="pickDialog" aria-labelledby="pickTitle">
+    <div class="dialog-inner">
+      <header class="dialog-head">
+        <h2 id="pickTitle">比較する履歴を選ぶ</h2>
+        <button class="icon-btn" id="btnPickClose" type="button" aria-label="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </header>
+      <ul class="history-list" id="pickList"></ul>
+      <p class="hint" id="pickEmpty" hidden>履歴はまだありません。動画を解析すると自動で残ります。</p>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastText"></span><button class="btn small primary" id="toastAction" type="button" hidden></button></div>
 </body>
 </html>

@@ -403,3 +403,49 @@ dialog p { margin: 0; color: var(--muted); font-size: 14px; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation-duration: 0s !important; }
 }
+
+/* ============================================================
+   追加: カメラ撮影・履歴・人物の範囲・スイングのループ・フッター
+   ============================================================ */
+.pick-alt { display: none; justify-content: center; margin-top: 12px; }
+.pick-alt .btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+@media (pointer: coarse) { .pick-alt { display: flex; } }
+
+.history { margin: 0 0 22px; padding: 16px 18px; border-radius: var(--radius); background: var(--bg-elev); border: 1px solid var(--border); }
+.history-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.history-head h2 { font-size: 16px; margin: 0; }
+.history-head .muted { font-size: 12px; }
+.history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.history-item { display: flex; gap: 12px; align-items: stretch; padding: 8px; border-radius: 12px; background: var(--bg-elev-2); border: 1px solid var(--border); min-width: 0; }
+.history-thumb { flex: none; width: 84px; height: 84px; padding: 0; border-radius: 9px; border: 1px solid var(--border-strong); background: #07090c; overflow: hidden; cursor: pointer; }
+.history-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.history-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; justify-content: center; }
+.history-name { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.history-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 4px; }
+.history-actions .link { font-size: 13px; }
+.history-rename { width: 100%; min-height: 34px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--accent); background: var(--bg-input); font-size: 14px; }
+.history-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-top: 12px; font-size: 13px; }
+.history-foot .check { font-size: 13px; color: var(--muted); }
+.link.danger { color: #fca5a5; }
+#pickDialog .history-list { margin-top: 10px; }
+
+.crop-row { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.crop-row .trim-buttons { margin-top: 8px; }
+.btn[aria-pressed="true"] { background: rgba(20, 184, 166, .16); border-color: var(--accent); color: var(--accent-strong); }
+body.cropping .video-wrap canvas { pointer-events: auto; cursor: crosshair; touch-action: none; }
+body.cropping .video-panel { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.swing-chip[aria-pressed="true"] { border-color: var(--accent); background: rgba(20, 184, 166, .16); }
+.swing-chip[aria-pressed="true"] b { color: var(--accent-strong); }
+.swing-hint { margin: -4px 0 12px; }
+.timeline-track .loop { position: absolute; top: 0; bottom: 0; background: rgba(45, 212, 191, .45); }
+
+.toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
+.toast.has-action:not(.show) { pointer-events: none; }
+
+.site-footer { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--border); text-align: center; color: var(--faint); font-size: 13px; }
+.site-footer nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-bottom: 10px; }
+.site-footer a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+.site-footer a:hover { color: var(--text); }
+.site-footer p { margin: 0; }
