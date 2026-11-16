@@ -185,6 +185,150 @@ export function samplingPlan(native, mode = 'auto') {
   return { fps: base.fps / step, period: base.frame * step, frame: base.frame, phase: base.phase, step, native: !!native };
 }
 
+/**
+ * 人物の範囲（窓）。指定された枠の中から人物を探し、見つかったあとはその人物を追いかける。
+ * 窓はいつも正方形で、中身を一定の大きさの canvas に描いて推定に使う。
+ *   ・見つかる前: 利用者が囲んだ枠の中だけを描く（枠の外は黒く塗り、ほかの人を拾わないようにする）
+ *   ・見つかった後: 人物を中心に、体の大きさに合わせた窓にする。近づいたり遠ざかったりしても追いかける
+ *   ・見失ったとき: 窓を少しずつ広げて探し直す
+ */
+class PersonWindow {
+  constructor(crop, W, H, follow, fps = 30) {
+    this.W = W; this.H = H;
+    this.follow = follow;
+    this.maxLost = Math.max(30, Math.round(fps * 5)); // これだけ見つからなければ、最初の枠から探し直す
+    this.box = { x: crop.x0 * W, y: crop.y0 * H, w: (crop.x1 - crop.x0) * W, h: (crop.y1 - crop.y0) * H };
+    this.cx = this.box.x + this.box.w / 2;
+    this.cy = this.box.y + this.box.h / 2;
+    this.side = Math.max(this.box.w, this.box.h, 16);
+    this.locked = false;
+    this.lost = 0;
+    this.sideAtLoss = this.side;
+    this.ref = null; // 追いかけている人物の、直前の位置と大きさ { x0, y0, x1, y1, cx, cy, h }
+    this.frameNo = 0;
+    this.hidden = []; // 別人とみなして、しばらく隠す場所 { x0, y0, x1, y1, until }
+    const size = follow ? 768 : Math.max(256, Math.min(1280, Math.round(this.side)));
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = this.canvas.height = size;
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
+  }
+
+  /** 今の窓（動画全体を0〜1とした座標）。表示用 */
+  rect() {
+    if (!this.locked) {
+      const b = this.box;
+      return { x0: b.x / this.W, y0: b.y / this.H, x1: (b.x + b.w) / this.W, y1: (b.y + b.h) / this.H };
+    }
+    const h = this.side / 2;
+    return {
+      x0: Math.max(0, (this.cx - h) / this.W), y0: Math.max(0, (this.cy - h) / this.H),
+      x1: Math.min(1, (this.cx + h) / this.W), y1: Math.min(1, (this.cy + h) / this.H),
+    };
+  }
+
+  /** 窓の中身を canvas に描き、推定結果を動画全体の座標に戻すための係数を返す */
+  draw(video) {
+    const { ctx, canvas, W, H } = this;
+    const S = canvas.width;
+    const sx = this.cx - this.side / 2, sy = this.cy - this.side / 2, k = S / this.side;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, S, S);
+    // 描く範囲: 窓と動画の重なり。見つかる前は、さらに利用者の枠の中だけにする
+    let x0 = Math.max(0, sx), y0 = Math.max(0, sy), x1 = Math.min(W, sx + this.side), y1 = Math.min(H, sy + this.side);
+    if (!this.locked) {
+      const b = this.box;
+      x0 = Math.max(x0, b.x); y0 = Math.max(y0, b.y); x1 = Math.min(x1, b.x + b.w); y1 = Math.min(y1, b.y + b.h);
+    }
+    if (x1 - x0 >= 2 && y1 - y0 >= 2) {
+      ctx.drawImage(video, x0, y0, x1 - x0, y1 - y0, (x0 - sx) * k, (y0 - sy) * k, (x1 - x0) * k, (y1 - y0) * k);
+    }
+    // 別人とみなした場所は黒く塗って、検出されないようにする
+    this.frameNo++;
+    this.hidden = this.hidden.filter((r) => r.until >= this.frameNo);
+    for (const r of this.hidden) ctx.fillRect((r.x0 - sx) * k, (r.y0 - sy) * k, (r.x1 - r.x0) * k, (r.y1 - r.y0) * k);
+    return { ox: sx / W, oy: sy / H, kx: this.side / W, ky: this.side / H };
+  }
+
+  // 推定結果の人物を囲む四角（画素）
+  bounds(frame) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let j = 0; j < N; j++) {
+      const x = frame.image[j * 3] * this.W, y = frame.image[j * 3 + 1] * this.H;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    return { x0, y0, x1, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, h: y1 - y0 };
+  }
+
+  /**
+   * 推定された人物が、追いかけている人物と同じ人かどうか。
+   * 体の大きさや位置が急に変わったら別人とみなし、その場所をしばらく隠して探し直す。
+   */
+  accept(frame) {
+    if (!this.follow || !this.locked || !this.ref) return true;
+    const b = this.bounds(frame);
+    const r = this.ref;
+    const gap = this.lost + 1; // 最後に見えてから何コマ目か
+    // 大きさ: 見失っている間も、同じ人なら映る大きさはあまり変わらない（少しだけゆるめる）
+    const slack = Math.min(1.25, 1 + 0.01 * (gap - 1));
+    const ratio = b.h / r.h;
+    const sizeOk = ratio > 0.5 / slack && ratio < 2 * slack;
+    // 位置: 見失っている時間が長いほど、離れた場所でも同じ人として受け入れる
+    const distOk = Math.hypot(b.cx - r.cx, b.cy - r.cy) < r.h * (0.45 + 0.1 * gap);
+    if (sizeOk && distOk) return true;
+    // 追いかけている人物と大きく重なっていなければ、その場所を隠す
+    const ix = Math.max(0, Math.min(b.x1, r.x1) - Math.max(b.x0, r.x0));
+    const iy = Math.max(0, Math.min(b.y1, r.y1) - Math.max(b.y0, r.y0));
+    const area = Math.max(1, (b.x1 - b.x0) * (b.y1 - b.y0));
+    if ((ix * iy) / area < 0.4) {
+      const mx = (b.x1 - b.x0) * 0.08, my = (b.y1 - b.y0) * 0.08;
+      this.hidden.push({ x0: b.x0 - mx, y0: b.y0 - my, x1: b.x1 + mx, y1: b.y1 + my, until: this.frameNo + 45 });
+    }
+    return false;
+  }
+
+  /** 推定結果（動画全体の座標）を見て、次のコマの窓を決める */
+  update(frame) {
+    if (!this.follow) return; // 追いかけない設定: 最初の枠のまま
+    if (!frame.image) {
+      if (!this.locked) return;
+      // 見失った: しばらくは同じ場所で待ち、それでも見つからなければ少しずつ広げて探す
+      if (this.lost === 0) this.sideAtLoss = this.side;
+      this.lost++;
+      if (this.lost > 8) this.side = Math.min(this.side * 1.05, this.sideAtLoss * 2, Math.max(this.W, this.H) * 1.5);
+      if (this.lost > this.maxLost) {
+        // 長いあいだ見つからない: 最初に囲んだ枠に戻って、探し直す
+        this.locked = false;
+        this.ref = null;
+        this.hidden = [];
+        this.lost = 0;
+        this.cx = this.box.x + this.box.w / 2;
+        this.cy = this.box.y + this.box.h / 2;
+        this.side = Math.max(this.box.w, this.box.h, 16);
+      }
+      return;
+    }
+    const b = this.bounds(frame);
+    const { x0, y0, x1, y1 } = b;
+    // 体の大きさは、急な変化（しゃがむ・腕を上げる）に引きずられないようにならして覚える
+    b.h = this.ref ? this.ref.h + (b.h - this.ref.h) * 0.3 : b.h;
+    this.ref = b;
+    const want = Math.max(48, Math.min(Math.max(this.W, this.H) * 1.5, Math.max((y1 - y0) * 1.6, (x1 - x0) * 1.6)));
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    if (!this.locked) {
+      // 最初に見つけたとき: その人物に合わせた窓に切り替える
+      this.locked = true;
+      this.cx = mx; this.cy = my; this.side = want;
+    } else {
+      // 大きくなるほうにはすぐ、小さくなるほうにはゆっくり合わせる（しゃがんだ直後に立ち上がってもはみ出さない）
+      const rate = want > this.side ? 0.5 : (this.side > want * 1.3 ? 0.25 : 0.08);
+      this.side += (want - this.side) * rate;
+      this.cx += (mx - this.cx) * 0.6;
+      this.cy += (my - this.cy) * 0.6;
+    }
+    this.lost = 0;
+  }
+}
+
 export class PoseExtractor {
   constructor() {
     this.landmarker = null;
@@ -270,11 +414,12 @@ export class PoseExtractor {
    * 動画の指定範囲を一定間隔で解析する
    * @param {HTMLVideoElement} video
    * @param {{start:number, end:number, plan:object, crop?:{x0:number,y0:number,x1:number,y1:number}|null,
-   *   signal?:AbortSignal, onFrame?:Function}} opts
+   *   follow?:boolean, signal?:AbortSignal, onFrame?:Function}} opts
    *   plan: samplingPlan() の結果。コマの切れ目が分かっているときは、各コマの真ん中の時刻を取る
-   *   crop: 人物のいる範囲（動画全体を0〜1とした座標）。指定するとその範囲だけを切り抜いて推定する
+   *   crop: 人物のいる範囲（動画全体を0〜1とした座標）。指定するとその中から人物を探す
+   *   follow: 見つけた人物を追いかけるか（false なら最初の枠のまま）
    */
-  async extract(video, { start, end, plan, crop = null, signal, onFrame }) {
+  async extract(video, { start, end, plan, crop = null, follow = true, signal, onFrame }) {
     if (!this.landmarker) throw new Error('モデルが読み込まれていません');
     const lm = this.landmarker;
     // 前の動画の追跡状態を引き継がないように、グラフを作り直す
@@ -295,25 +440,8 @@ export class PoseExtractor {
     video.pause();
 
     // 範囲指定があるときは、その部分だけを canvas に描いて推定する
-    let source = video;
-    let map = null;
-    let ctx = null;
-    let rect = null;
-    if (crop) {
-      const W = video.videoWidth, H = video.videoHeight;
-      const sx = Math.max(0, Math.floor(crop.x0 * W)), sy = Math.max(0, Math.floor(crop.y0 * H));
-      const sw = Math.min(W - sx, Math.ceil((crop.x1 - crop.x0) * W)), sh = Math.min(H - sy, Math.ceil((crop.y1 - crop.y0) * H));
-      if (sw >= 16 && sh >= 16) {
-        const k = Math.min(1, 1280 / Math.max(sw, sh));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(16, Math.round(sw * k));
-        canvas.height = Math.max(16, Math.round(sh * k));
-        ctx = canvas.getContext('2d', { alpha: false });
-        rect = { sx, sy, sw, sh };
-        map = { ox: sx / W, oy: sy / H, kx: sw / W, ky: sh / H };
-        source = canvas;
-      }
-    }
+    const valid = crop && (crop.x1 - crop.x0) * video.videoWidth >= 16 && (crop.y1 - crop.y0) * video.videoHeight >= 16;
+    const win = valid ? new PersonWindow(crop, video.videoWidth, video.videoHeight, follow, 1 / period) : null;
 
     let errors = 0;
     for (let i = 0; i < count; i++) {
@@ -324,9 +452,11 @@ export class PoseExtractor {
       let ts = base + Math.round((t - first) * 1000);
       if (ts <= this.lastTimestamp) ts = this.lastTimestamp + 1;
       let result = null;
+      let map = null;
+      const shown = win ? win.rect() : null;
       try {
-        if (ctx) ctx.drawImage(video, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, source.width, source.height);
-        result = lm.detectForVideo(source, ts);
+        if (win) map = win.draw(video);
+        result = lm.detectForVideo(win ? win.canvas : video, ts);
       } catch (err) {
         console.warn('推定に失敗したコマ', t, err);
         errors++;
@@ -339,6 +469,12 @@ export class PoseExtractor {
       }
       this.lastTimestamp = ts;
       frames[i] = toFrame(result, t, map);
+      if (win) {
+        // 追いかけている人物と別の人を拾ったコマは、検出なしとして扱う
+        if (frames[i].image && !win.accept(frames[i])) frames[i] = { t, world: null, image: null, vis: null };
+        win.update(frames[i]);
+        frames[i].win = shown; // このコマで使った窓（解析中の表示用）
+      }
       onFrame?.(i, count, frames[i]);
     }
 

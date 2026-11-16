@@ -44,12 +44,13 @@ const settings = {
   smoothing: 2,
   floor: true,
   footwork: true,
+  follow: true, // 囲んだ人物を、動いても追いかける
   trail: true,
   mode: 'mannequin',
   overlay: true,
   keepVideo: true,
 };
-const PERSIST_KEYS = ['handedness', 'smoothing', 'floor', 'footwork', 'trail', 'mode', 'overlay', 'keepVideo'];
+const PERSIST_KEYS = ['handedness', 'smoothing', 'floor', 'footwork', 'follow', 'trail', 'mode', 'overlay', 'keepVideo'];
 // 履歴に残す動画の大きさの上限
 const MAX_HISTORY_VIDEO_BYTES = 150 * 1024 * 1024;
 
@@ -398,6 +399,7 @@ function updateTrimHead() {
 
 function setTrimStart() {
   const t = video.currentTime || 0;
+  if (state.crop) toast('開始位置を変えました。この位置で、人物が枠の中に入っているか確かめてください。', 'info', 5000);
   state.trim.start = clamp(t, 0, Math.max(0, state.duration - 0.2));
   if (state.trim.end <= state.trim.start + 0.2 || state.trim.end - state.trim.start > MAX_ANALYZE_SECONDS) {
     state.trim.end = Math.min(state.duration, state.trim.start + Math.min(MAX_ANALYZE_SECONDS, Math.max(3, state.trim.end - state.trim.start)));
@@ -434,7 +436,11 @@ function setCropMode(on) {
   els.btnCrop.textContent = active ? '動画の上をなぞってください' : (state.crop ? '囲み直す' : '人物を囲む');
   if (state.phase === 'preview') {
     video.controls = !active;
-    if (active) video.pause();
+    if (active) {
+      // 解析を始める位置のコマを見せる（その位置で人物が枠に入っている必要があるため）
+      video.pause();
+      if (Math.abs((video.currentTime || 0) - state.trim.start) > 0.05) video.currentTime = state.trim.start;
+    }
   }
   if (!active) cropDrag = null;
 }
@@ -551,7 +557,7 @@ async function analyze() {
     if (ac.signal.aborted) throw new DOMException('中止しました', 'AbortError');
     const began = performance.now();
     return extractor.extract(video, {
-      start, end, plan, crop: state.crop, signal: ac.signal,
+      start, end, plan, crop: state.crop, follow: settings.follow, signal: ac.signal,
       onFrame: (i, n, frame) => {
         const done = i + 1;
         const el = (performance.now() - began) / 1000;
@@ -588,8 +594,11 @@ async function analyze() {
     state.historyId = null;
     if (!(await enterViewer())) return;
     const ratio = state.motion?.validRatio ?? 0;
+    const bodyPx = medianBodyHeight(raw);
     if (ratio < 0.6) {
       toast(`人物を検出できたのは全体の${Math.round(ratio * 100)}%のコマでした。全身が映るように撮ると精度が上がります。`, 'info', 7000);
+    } else if (bodyPx > 0 && bodyPx < 300 && model !== 'heavy' && MODEL_URLS.heavy) {
+      toast('3Dモデルができました。人物が小さく映っているので、「解析の精度」を「高精度」にするともっと安定します。', 'info', 9000);
     } else {
       toast('3Dモデルができました。ドラッグで回して見てみましょう。');
     }
@@ -610,6 +619,20 @@ async function analyze() {
   }
 }
 
+// 映っている人物の大きさ（頭から足までの画素数）の中央値
+function medianBodyHeight(raw) {
+  const hs = [];
+  for (const f of raw.frames) {
+    if (!f.image) continue;
+    let lo = Infinity, hi = -Infinity;
+    for (let j = 0; j < N; j++) { const y = f.image[j * 3 + 1]; if (y < lo) lo = y; if (y > hi) hi = y; }
+    hs.push((hi - lo) * raw.videoHeight);
+  }
+  if (!hs.length) return 0;
+  hs.sort((a, b) => a - b);
+  return hs[hs.length >> 1];
+}
+
 function setProgress(status, ratio, count, eta) {
   els.procStatus.textContent = status;
   els.procBar.style.width = `${Math.round(ratio * 100)}%`;
@@ -619,6 +642,8 @@ function setProgress(status, ratio, count, eta) {
 
 const procBuf = new Float32Array(N * 3);
 function drawProcessingOverlay(frame) {
+  // 人物を追いかけているときは、枠も一緒に動かして見せる
+  if (frame.win) overlay.crop = frame.win;
   if (!frame.image) { overlay.clear(); return; }
   let img = frame.image;
   let vis = frame.vis;
@@ -1123,6 +1148,7 @@ function onSettingChanged(key) {
       updateFrame(true);
       break;
     case 'keepVideo':
+    case 'follow':
       break;
     case 'mirror':
       document.body.classList.toggle('mirrored', settings.mirror && state.hasVideo);
